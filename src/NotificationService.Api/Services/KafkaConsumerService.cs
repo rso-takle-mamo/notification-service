@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Confluent.Kafka;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -8,7 +9,8 @@ using NotificationService.Api.Configuration;
 using NotificationService.Api.Events;
 using NotificationService.Api.Events.Tenant;
 using NotificationService.Api.Events.User;
-using NotificationServiceType = NotificationService.Api.Services.NotificationService;
+using NotificationService.Api.Events.Booking;
+using NotificationService.Api.Services.Interfaces;
 
 namespace NotificationService.Api.Services;
 
@@ -53,12 +55,21 @@ public class KafkaConsumerService(
         };
     }
 
+    private ConsumerConfig CreateBookingConsumerConfig()
+    {
+        return new ConsumerConfig
+        {
+            BootstrapServers = _kafkaSettings.BootstrapServers,
+            GroupId = $"{_kafkaSettings.ConsumerGroupId}-booking-events",
+            AutoOffsetReset = KafkaConstants.ParseAutoOffsetReset(_kafkaSettings.AutoOffsetReset),
+            EnableAutoCommit = _kafkaSettings.EnableAutoCommit
+        };
+    }
+
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
         logger.LogInformation("Kafka Consumer Service starting...");
 
-        // Run all consumers in the background without awaiting them
-        // This allows the web server to start immediately
         _ = Task.Run(async () =>
         {
             try
@@ -95,7 +106,18 @@ public class KafkaConsumerService(
             }
         }, cancellationToken);
 
-        // Keep the service running indefinitely
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ConsumeBookingEventsAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Booking events consumer failed unexpectedly.");
+            }
+        }, cancellationToken);
+
         await Task.Delay(Timeout.Infinite, cancellationToken);
     }
 
@@ -105,7 +127,6 @@ public class KafkaConsumerService(
 
         var consumerConfig = CreateUserConsumerConfig();
 
-        // Retry consumer initialization indefinitely (with backoff)
         IConsumer<Ignore, string>? consumer = null;
         var retryCount = 0;
         var retryDelayMs = 2000;
@@ -151,14 +172,15 @@ public class KafkaConsumerService(
 
                     try
                     {
-                        var baseEvent = JsonSerializer.Deserialize<BaseEvent>(consumeResult.Message.Value, KafkaConstants.JsonSerializerOptions);
-                        if (baseEvent == null)
+                        var jsonNode = JsonNode.Parse(consumeResult.Message.Value);
+                        var eventType = jsonNode?["eventType"]?.GetValue<string>();
+                        if (string.IsNullOrEmpty(eventType))
                         {
-                            logger.LogWarning("Failed to deserialize user event as BaseEvent");
+                            logger.LogWarning("Event missing eventType field");
                             continue;
                         }
 
-                        await ProcessUserEventAsync(baseEvent, consumeResult.Message.Value);
+                        await ProcessUserEventAsync(eventType, consumeResult.Message.Value);
                         consumer.Commit(consumeResult);
                     }
                     catch (JsonException jsonEx)
@@ -190,7 +212,6 @@ public class KafkaConsumerService(
         logger.LogInformation("Tenant consumer config created: BootstrapServers={BootstrapServers}, GroupId={GroupId}",
             consumerConfig.BootstrapServers, consumerConfig.GroupId);
 
-        // Retry consumer initialization indefinitely (with backoff)
         IConsumer<Ignore, string>? consumer = null;
         var retryCount = 0;
         var retryDelayMs = 2000;
@@ -238,14 +259,15 @@ public class KafkaConsumerService(
 
                     try
                     {
-                        var baseEvent = JsonSerializer.Deserialize<BaseEvent>(consumeResult.Message.Value, KafkaConstants.JsonSerializerOptions);
-                        if (baseEvent == null)
+                        var jsonNode = JsonNode.Parse(consumeResult.Message.Value);
+                        var eventType = jsonNode?["eventType"]?.GetValue<string>();
+                        if (string.IsNullOrEmpty(eventType))
                         {
-                            logger.LogWarning("Failed to deserialize tenant event as BaseEvent");
+                            logger.LogWarning("Event missing eventType field");
                             continue;
                         }
 
-                        await ProcessTenantEventAsync(baseEvent, consumeResult.Message.Value);
+                        await ProcessTenantEventAsync(eventType, consumeResult.Message.Value);
                         consumer.Commit(consumeResult);
                     }
                     catch (JsonException jsonEx)
@@ -269,14 +291,14 @@ public class KafkaConsumerService(
         }
     }
 
-    private async Task ProcessUserEventAsync(BaseEvent baseEvent, string eventJson)
+    private async Task ProcessUserEventAsync(string eventType, string eventJson)
     {
         using var scope = serviceProvider.CreateScope();
-        var notificationService = scope.ServiceProvider.GetRequiredService<NotificationServiceType>();
+        var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
 
         try
         {
-            switch (baseEvent.EventType)
+            switch (eventType)
             {
                 case nameof(CustomerCreatedEvent):
                     var customerCreatedEvent = JsonSerializer.Deserialize<CustomerCreatedEvent>(eventJson, KafkaConstants.JsonSerializerOptions);
@@ -306,25 +328,25 @@ public class KafkaConsumerService(
                     break;
 
                 default:
-                    logger.LogWarning("Unknown user event type: {EventType}", baseEvent.EventType);
+                    logger.LogWarning("Unknown user event type: {EventType}", eventType);
                     break;
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error processing user event {EventType} for event {EventId}", baseEvent.EventType, baseEvent.EventId);
+            logger.LogError(ex, "Error processing user event {EventType}", eventType);
             throw;
         }
     }
 
-    private async Task ProcessTenantEventAsync(BaseEvent baseEvent, string eventJson)
+    private async Task ProcessTenantEventAsync(string eventType, string eventJson)
     {
         using var scope = serviceProvider.CreateScope();
-        var notificationService = scope.ServiceProvider.GetRequiredService<NotificationServiceType>();
+        var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
 
         try
         {
-            switch (baseEvent.EventType)
+            switch (eventType)
             {
                 case nameof(TenantCreatedEvent):
                     var tenantCreatedEvent = JsonSerializer.Deserialize<TenantCreatedEvent>(eventJson, KafkaConstants.JsonSerializerOptions);
@@ -345,13 +367,13 @@ public class KafkaConsumerService(
                     break;
 
                 default:
-                    logger.LogWarning("Unknown tenant event type: {EventType}", baseEvent.EventType);
+                    logger.LogWarning("Unknown tenant event type: {EventType}", eventType);
                     break;
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error processing tenant event {EventType} for event {EventId}", baseEvent.EventType, baseEvent.EventId);
+            logger.LogError(ex, "Error processing tenant event {EventType}", eventType);
             throw;
         }
     }
@@ -362,7 +384,6 @@ public class KafkaConsumerService(
 
         var consumerConfig = CreateProviderConsumerConfig();
 
-        // Retry consumer initialization indefinitely (with backoff)
         IConsumer<Ignore, string>? consumer = null;
         var retryCount = 0;
         var retryDelayMs = 2000;
@@ -408,14 +429,15 @@ public class KafkaConsumerService(
 
                     try
                     {
-                        var baseEvent = JsonSerializer.Deserialize<BaseEvent>(consumeResult.Message.Value, KafkaConstants.JsonSerializerOptions);
-                        if (baseEvent == null)
+                        var jsonNode = JsonNode.Parse(consumeResult.Message.Value);
+                        var eventType = jsonNode?["eventType"]?.GetValue<string>();
+                        if (string.IsNullOrEmpty(eventType))
                         {
-                            logger.LogWarning("Failed to deserialize provider event as BaseEvent");
+                            logger.LogWarning("Event missing eventType field");
                             continue;
                         }
 
-                        await ProcessProviderEventAsync(baseEvent, consumeResult.Message.Value);
+                        await ProcessProviderEventAsync(eventType, consumeResult.Message.Value);
                         consumer.Commit(consumeResult);
                     }
                     catch (JsonException jsonEx)
@@ -439,14 +461,14 @@ public class KafkaConsumerService(
         }
     }
 
-    private async Task ProcessProviderEventAsync(BaseEvent baseEvent, string eventJson)
+    private async Task ProcessProviderEventAsync(string eventType, string eventJson)
     {
         using var scope = serviceProvider.CreateScope();
-        var notificationService = scope.ServiceProvider.GetRequiredService<NotificationServiceType>();
+        var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
 
         try
         {
-            switch (baseEvent.EventType)
+            switch (eventType)
             {
                 case nameof(ProviderCreatedEvent):
                     var providerCreatedEvent = JsonSerializer.Deserialize<ProviderCreatedEvent>(eventJson, KafkaConstants.JsonSerializerOptions);
@@ -458,13 +480,135 @@ public class KafkaConsumerService(
                     break;
 
                 default:
-                    logger.LogWarning("Unknown provider event type: {EventType}", baseEvent.EventType);
+                    logger.LogWarning("Unknown provider event type: {EventType}", eventType);
                     break;
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error processing provider event {EventType} for event {EventId}", baseEvent.EventType, baseEvent.EventId);
+            logger.LogError(ex, "Error processing provider event {EventType}", eventType);
+            throw;
+        }
+    }
+
+    private async Task ConsumeBookingEventsAsync(CancellationToken cancellationToken)
+    {
+        logger.LogInformation("Starting booking events consumer for topic: {Topic}", _kafkaSettings.BookingEventsTopic);
+
+        var consumerConfig = CreateBookingConsumerConfig();
+
+        IConsumer<Ignore, string>? consumer = null;
+        var retryCount = 0;
+        var retryDelayMs = 2000;
+
+        while (consumer == null && !cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                consumer = new ConsumerBuilder<Ignore, string>(consumerConfig).Build();
+                consumer.Subscribe(_kafkaSettings.BookingEventsTopic);
+                logger.LogInformation("Successfully connected to Kafka and subscribed to topic: {Topic}", _kafkaSettings.BookingEventsTopic);
+                break;
+            }
+            catch (Exception ex)
+            {
+                retryCount++;
+                logger.LogWarning(ex, "Failed to initialize Kafka consumer (attempt {RetryCount}). Retrying in {Delay}ms...", retryCount, retryDelayMs);
+                consumer?.Dispose();
+                consumer = null;
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    await Task.Delay(retryDelayMs, cancellationToken);
+                }
+            }
+        }
+
+        if (consumer == null)
+        {
+            logger.LogError("Failed to initialize Kafka consumer after cancellation. Stopping consumer.");
+            return;
+        }
+
+        try
+        {
+            using (consumer)
+            {
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    var consumeResult = consumer.Consume(cancellationToken);
+                    if (consumeResult.Message is null) continue;
+
+                    logger.LogInformation("Received booking event: {EventType}", consumeResult.Message.Key);
+
+                    try
+                    {
+                        var jsonNode = JsonNode.Parse(consumeResult.Message.Value);
+                        var eventType = jsonNode?["eventType"]?.GetValue<string>();
+                        if (string.IsNullOrEmpty(eventType))
+                        {
+                            logger.LogWarning("Event missing eventType field");
+                            continue;
+                        }
+
+                        await ProcessBookingEventAsync(eventType, consumeResult.Message.Value);
+                        consumer.Commit(consumeResult);
+                    }
+                    catch (JsonException jsonEx)
+                    {
+                        logger.LogError(jsonEx, "Failed to parse booking event JSON: {Message}", consumeResult.Message.Value);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Error processing booking event: {EventType}", consumeResult.Message.Key);
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            logger.LogInformation("Booking events consumer stopped due to cancellation");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Booking events consumer error");
+        }
+    }
+
+    private async Task ProcessBookingEventAsync(string eventType, string eventJson)
+    {
+        using var scope = serviceProvider.CreateScope();
+        var bookingEventService = scope.ServiceProvider.GetRequiredService<IBookingEventService>();
+
+        try
+        {
+            switch (eventType)
+            {
+                case nameof(BookingCreatedEvent):
+                    var bookingCreatedEvent = JsonSerializer.Deserialize<BookingCreatedEvent>(eventJson, KafkaConstants.JsonSerializerOptions);
+                    if (bookingCreatedEvent != null)
+                    {
+                        logger.LogInformation("Processing BookingCreatedEvent for booking {BookingId}", bookingCreatedEvent.BookingId);
+                        await bookingEventService.HandleBookingCreatedEventAsync(bookingCreatedEvent);
+                    }
+                    break;
+
+                case nameof(BookingCancelledEvent):
+                    var bookingCancelledEvent = JsonSerializer.Deserialize<BookingCancelledEvent>(eventJson, KafkaConstants.JsonSerializerOptions);
+                    if (bookingCancelledEvent != null)
+                    {
+                        logger.LogInformation("Processing BookingCancelledEvent for booking {BookingId}", bookingCancelledEvent.BookingId);
+                        await bookingEventService.HandleBookingCancelledEventAsync(bookingCancelledEvent);
+                    }
+                    break;
+
+                default:
+                    logger.LogWarning("Unknown booking event type: {EventType}", eventType);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error processing booking event {EventType}", eventType);
             throw;
         }
     }

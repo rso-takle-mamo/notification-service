@@ -24,6 +24,9 @@ builder.Services.AddNotificationDatabase();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<INotificationService, NotificationService.Api.Services.NotificationService>();
 
+// Register booking event service
+builder.Services.AddScoped<IBookingEventService, BookingEventService>();
+
 // Register Kafka consumer as background service
 builder.Services.AddHostedService<KafkaConsumerService>();
 
@@ -79,7 +82,9 @@ app.MapHealthChecks("/health/live", new HealthCheckOptions
 
 app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
-    Predicate = (check) => check.Tags.Contains("self") || check.Tags.Contains("db"),
+    Predicate = check =>
+        check.Tags.Contains("db") ||
+        check.Tags.Contains("kafka"),
     ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse,
     AllowCachingResponses = false
 });

@@ -5,7 +5,7 @@ using NotificationService.Api.Configuration;
 
 namespace NotificationService.Api.HealthChecks;
 
-public class KafkaHealthCheck(
+public sealed class KafkaHealthCheck(
     IOptions<KafkaSettings> kafkaSettings,
     ILogger<KafkaHealthCheck> logger)
     : IHealthCheck
@@ -18,21 +18,25 @@ public class KafkaHealthCheck(
     {
         try
         {
-            var config = new ProducerConfig
+            var config = new AdminClientConfig
             {
                 BootstrapServers = _kafkaSettings.BootstrapServers,
-                MessageTimeoutMs = 1000
+                SocketTimeoutMs = 1000
             };
 
-            using var producer = new ProducerBuilder<Null, string>(config).Build();
+            using var adminClient = new AdminClientBuilder(config).Build();
 
-            // If we can create a producer without exception, Kafka is reachable
-            return Task.FromResult(HealthCheckResult.Healthy("Kafka is reachable"));
+            adminClient.GetMetadata(TimeSpan.FromSeconds(1));
+
+            return Task.FromResult(
+                HealthCheckResult.Healthy("Kafka broker reachable"));
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Kafka health check failed");
-            return Task.FromResult(HealthCheckResult.Unhealthy("Kafka is not reachable", ex));
+
+            return Task.FromResult(
+                HealthCheckResult.Unhealthy("Kafka broker not reachable", ex));
         }
     }
 }
