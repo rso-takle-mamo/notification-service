@@ -31,30 +31,70 @@ public class EmailService(ILogger<EmailService> logger) : IEmailService
         return Task.CompletedTask;
     }
 
-//     public Task SendBookingConfirmationEmailAsync(string email, string firstName, string lastName, DateTime bookingDate)
-//     {
-//         logger.LogInformation(
-//             "[MOCK] Sending booking confirmation email to {Email} for {FirstName} {LastName} on {BookingDate}",
-//             email, firstName, lastName, bookingDate);
-//
-//         var emailContent = $@"
-//         Subject: Booking Confirmation
-//
-//         Dear {firstName} {lastName},
-//
-//         Your booking has been confirmed for {bookingDate:yyyy-MM-dd HH:mm}.
-//
-//         Please arrive 5 minutes before your scheduled time.
-//
-//         Best regards,
-//         The Team
-//         ";
-//
-//         logger.LogDebug("Email content: {Content}", emailContent);
-//
-//         Task.Delay(150);
-//
-//         logger.LogInformation("Booking confirmation email sent to {Email}", email);
-//         return Task.CompletedTask;
-//     }
+    public Task SendBookingCreatedEmailAsync(string email, string firstName, string userName, Guid bookingId, Guid serviceId, DateTime startDateTime, DateTime endDateTime, string? notes)
+    {
+        logger.LogInformation(
+            "[MOCK] Sending booking created email to {Email} for user {UserName}",
+            email, userName);
+
+        // Mock email content
+        var emailContent = $@"
+        Subject: Your booking has been confirmed!
+
+        Dear {userName},
+
+        Your booking has been successfully created!
+
+        Booking ID: {bookingId}
+        Service ID: {serviceId}
+        Start Time: {startDateTime:yyyy-MM-dd HH:mm}
+        End Time: {endDateTime:yyyy-MM-dd HH:mm}
+        Notes: {notes ?? "N/A"}
+
+        Thank you for your booking!
+
+        Best regards,
+        The Team
+        ";
+
+        logger.LogDebug("Email content: {Content}", emailContent);
+
+        // Simulate email sending delay
+        Task.Delay(150);
+
+        logger.LogInformation("Booking created email successfully sent to {Email}", email);
+        return Task.CompletedTask;
+    }
+
+    public Task SendBookingCancelledEmailAsync(string email, string firstName, string userName, Guid bookingId, Guid serviceId)
+    {
+        logger.LogInformation(
+            "[MOCK] Sending booking cancelled email to {Email} for user {UserName}",
+            email, userName);
+
+        // Mock email content
+        var emailContent = $@"
+        Subject: Your booking has been cancelled
+
+        Dear {userName},
+
+        Your booking has been cancelled as requested.
+
+        Booking ID: {bookingId}
+        Service ID: {serviceId}
+
+        We hope to serve you again soon!
+
+        Best regards,
+        The Team
+        ";
+
+        logger.LogDebug("Email content: {Content}", emailContent);
+
+        // Simulate email sending delay
+        Task.Delay(150);
+
+        logger.LogInformation("Booking cancelled email successfully sent to {Email}", email);
+        return Task.CompletedTask;
+    }
 }

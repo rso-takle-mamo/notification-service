@@ -15,14 +15,12 @@ public class NotificationService(
     ITenantRepository tenantRepository,
     IBookingRepository bookingRepository) : INotificationService
 {
-    // User Event Handlers
     public async Task HandleCustomerCreatedEventAsync(CustomerCreatedEvent customerEvent)
     {
         logger.LogInformation("Handling customer created event for user ID: {UserId}", customerEvent.UserId);
 
         try
         {
-            // Check if user already exists to prevent duplicates
             var existingUser = await userRepository.GetByIdAsync(customerEvent.UserId);
             if (existingUser != null)
             {
@@ -63,7 +61,6 @@ public class NotificationService(
 
         try
         {
-            // First, create the tenant if it doesn't exist
             var existingTenant = await tenantRepository.GetByIdAsync(providerEvent.TenantId);
             if (existingTenant == null)
             {
@@ -87,7 +84,6 @@ public class NotificationService(
                 logger.LogInformation("Tenant {TenantId} already exists, skipping creation", providerEvent.TenantId);
             }
 
-            // Then, create the user if it doesn't exist
             var existingUser = await userRepository.GetByIdAsync(providerEvent.UserId);
             if (existingUser == null)
             {
@@ -129,8 +125,6 @@ public class NotificationService(
 
         try
         {
-            // Create a new user entity with updated properties
-            // Since GetByIdAsync uses AsNoTracking, we need to create a new entity for update
             var updatedUser = new User
             {
                 Id = userEvent.UserId,
@@ -138,8 +132,6 @@ public class NotificationService(
                 LastName = userEvent.LastName,
                 Email = userEvent.Email,
                 TenantId = userEvent.TenantId
-                // CreatedAt is preserved from existing record
-                // UpdatedAt is set automatically by the database context on update
             };
 
             await userRepository.UpdateAsync(updatedUser);
@@ -182,7 +174,6 @@ public class NotificationService(
 
         try
         {
-            // Check if tenant already exists to prevent duplicates
             var existingTenant = await tenantRepository.GetByIdAsync(tenantEvent.TenantId);
             if (existingTenant != null)
             {
@@ -190,7 +181,6 @@ public class NotificationService(
                 return;
             }
 
-            // Create tenant in notification database
             var tenant = new Tenant
             {
                 Id = tenantEvent.TenantId,
@@ -199,9 +189,8 @@ public class NotificationService(
                 BusinessName = tenantEvent.BusinessName,
                 BusinessEmail = tenantEvent.BusinessEmail,
                 BusinessPhone = tenantEvent.BusinessPhone,
-                Address = tenantEvent.Address ?? string.Empty, // Handle null address
+                Address = tenantEvent.Address ?? string.Empty,
                 Description = tenantEvent.Description
-                // CreatedAt and UpdatedAt are set automatically by the database context
             };
 
             await tenantRepository.CreateAsync(tenant);
@@ -220,8 +209,6 @@ public class NotificationService(
 
         try
         {
-            // Create a new tenant entity with updated properties
-            // Since GetByIdAsync uses AsNoTracking, we need to create a new entity for update
             var updatedTenant = new Tenant
             {
                 Id = tenantEvent.TenantId,
@@ -230,10 +217,8 @@ public class NotificationService(
                 BusinessName = tenantEvent.BusinessName,
                 BusinessEmail = tenantEvent.BusinessEmail,
                 BusinessPhone = tenantEvent.BusinessPhone,
-                Address = tenantEvent.Address ?? string.Empty, // Handle null address
+                Address = tenantEvent.Address ?? string.Empty,
                 Description = tenantEvent.Description
-                // CreatedAt is preserved from existing record
-                // UpdatedAt is set automatically by the database context on update
             };
 
             await tenantRepository.UpdateAsync(updatedTenant);
@@ -245,50 +230,4 @@ public class NotificationService(
             throw;
         }
     }
-    
-
-    // public async Task HandleBookingCreatedEventAsync(Guid bookingId)
-    // {
-    //     logger.LogInformation("Handling booking created event for booking ID: {BookingId}", bookingId);
-    //
-    //     try
-    //     {
-    //         var booking = await bookingRepository.GetByIdAsync(bookingId);
-    //         if (booking == null)
-    //         {
-    //             logger.LogWarning("Booking with ID {BookingId} not found", bookingId);
-    //             return;
-    //         }
-    //
-    //         // For now, we'll assume the booking has a user ID
-    //         // In a real implementation, you'd have the user ID in the booking or related data
-    //         logger.LogInformation("Booking created for Tenant: {TenantId} on {Date}",
-    //             booking.TenantId, booking.StartDateTime);
-    //
-    //         // This is a placeholder - in a real implementation, you'd get the user email from the booking
-    //         // or from the event data when Kafka is integrated
-    //         logger.LogInformation("Booking created notification sent");
-    //     }
-    //     catch (Exception ex)
-    //     {
-    //         logger.LogError(ex, "Error processing booking creation notification for booking ID: {BookingId}", bookingId);
-    //         throw;
-    //     }
-    // }
-    //
-    // public async Task SendBookingConfirmationAsync(string email, string firstName, string lastName, DateTime bookingDate)
-    // {
-    //     logger.LogInformation("Sending booking confirmation to {Email} for {Date}", email, bookingDate);
-    //
-    //     try
-    //     {
-    //         await emailService.SendBookingConfirmationEmailAsync(email, firstName, lastName, bookingDate);
-    //         logger.LogInformation("Booking confirmation sent successfully to {Email}", email);
-    //     }
-    //     catch (Exception ex)
-    //     {
-    //         logger.LogError(ex, "Error sending booking confirmation to {Email}", email);
-    //         throw;
-    //     }
-    // }
 }
